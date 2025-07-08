@@ -1,0 +1,31 @@
+<resources>
+    <color name="purple_500">#6200EE</color>
+    <color name="purple_700">#3700B3</color>
+    <color name="teal_200">#03DAC5</color>
+    <color name="teal_700">#018786</color>
+    <color name="white">#FFFFFF</color>
+    <color name="black">#000000</color>
+    <color name="exo_styled_error_message_background">#B00020</color>
+
+    <color name="colorPrimary">#6200EE</color>
+    <color name="colorPrimaryDark">#3700B3</color>
+    <color name="colorAccent">#03DAC5</color>
+    <color name="primary">#6200EE</color>
+    <color name="primaryDark">#3700B3</color>
+    <color name="primaryLight">#BB86FC</color>
+
+    <color name="colorBackground">#FFFFFF</color>
+    <color name="ayahNumberText">#C9A84E</color>
+    <color name="textPrimary">#212121</color>
+    <color name="gray">#BDBDBD</color>
+    <color name="tabIndicator">#FFD700</color>        <!-- أصفر ذهبي -->
+    <color name="tabTextDefault">#757575</color>      <!-- رمادي غامق -->
+    <color name="tabTextSelected">#212121</color>     <!-- أسود غامق -->
+    <color name="primaryText">#212121</color>
+    <color name="accent">#03DAC5</color>
+    <color name="appBackground">#FAFAFA</color>
+    <color name="textSecondary">#757575</color>
+    <color name="bookmarkTitleColor">#3F51B5</color>
+    <color name="cardBackground">#FFFFFF</color>
+
+</resources>

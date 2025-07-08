@@ -1,0 +1,30 @@
+<resources>
+    <!-- اذا لم يعمل الأول جرب الثاني -->
+    <style name="Theme.QuranKarim" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/colorPrimary</item>
+        <item name="colorPrimaryDark">@color/colorPrimaryDark</item>
+        <item name="colorAccent">@color/colorAccent</item>
+        <item name="colorPrimaryVariant">@color/purple_700</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorSecondary">@color/teal_200</item>
+        <item name="colorSecondaryVariant">@color/teal_700</item>
+        <item name="colorOnSecondary">@color/white</item>
+        <item name="android:statusBarColor">@color/colorPrimaryDark</item>
+        <item name="android:windowBackground">@color/appBackground</item>
+        <item name="android:textColorPrimary">@color/textPrimary</item>
+        <item name="android:textColorSecondary">@color/textSecondary</item>
+        <item name="cardViewStyle">@style/CardViewStyle</item>
+    </style>
+
+    <style name="CardViewStyle" parent="Widget.MaterialComponents.CardView">
+        <item name="cardBackgroundColor">@color/cardBackground</item>
+        <item name="cardCornerRadius">12dp</item>
+        <item name="cardElevation">3dp</item>
+    </style>
+
+    <style name="TabTextAppearance" parent="TextAppearance.Material3.TitleMedium">
+        <item name="android:textSize">15sp</item>
+        <item name="android:textColor">@color/tabTextDefault</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+</resources>

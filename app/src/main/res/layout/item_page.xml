@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android" 
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+    <com.github.chrisbanes.photoview.PhotoView 
+        android:scaleType="fitCenter"
+        android:adjustViewBounds="true"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:id="@+id/pageImage" />
+    <View 
+        android:visibility="gone"
+        android:background="@drawable/bg_ayah_highlight"
+        android:layout_width="40dp"
+        android:layout_height="24dp"
+        android:id="@+id/ayahHighlight"
+        android:layout_gravity="top|start" />
+</FrameLayout>
