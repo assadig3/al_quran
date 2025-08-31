@@ -1,0 +1,85 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.drawerlayout.widget.DrawerLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/drawer_layout"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:layoutDirection="locale"
+    android:fitsSystemWindows="false"
+    android:background="@android:color/black">
+
+    <!-- المحتوى الرئيسي -->
+    <LinearLayout
+        android:id="@+id/root_container"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:orientation="vertical"
+        android:fitsSystemWindows="false"
+        android:background="@android:color/black"
+        android:clipToPadding="false"
+        android:clipChildren="false">
+
+        <!-- AppBar: Toolbar + Tabs (نطبّق عليها الـ insets لاحقًا بالكود فقط) -->
+        <com.google.android.material.appbar.AppBarLayout
+            android:id="@+id/appBar"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:background="@color/colorPrimary"
+            android:elevation="4dp"
+            android:fitsSystemWindows="false">
+
+            <com.google.android.material.appbar.MaterialToolbar
+                android:id="@+id/toolbar"
+                android:layout_width="match_parent"
+                android:layout_height="?attr/actionBarSize"
+                android:background="@color/colorPrimary"
+                app:title="@string/app_name"
+                app:titleTextColor="@color/textPrimary"
+                app:navigationIconTint="@color/textPrimary"
+                app:contentInsetStartWithNavigation="0dp"
+                app:theme="@style/ThemeOverlay.MaterialComponents.Dark.ActionBar" />
+
+            <com.google.android.material.tabs.TabLayout
+                android:id="@+id/topTabs"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:background="@color/colorPrimary"
+                app:tabMode="fixed"
+                app:tabGravity="fill"
+                app:tabIndicatorFullWidth="false"
+                app:tabIndicatorHeight="2dp"
+                app:tabIndicatorColor="@color/tabIndicator"
+                app:tabSelectedTextColor="@color/tabTextSelected"
+                app:tabTextColor="@color/tabTextDefault"
+                app:tabRippleColor="@android:color/transparent"
+                app:tabPaddingStart="8dp"
+                app:tabPaddingEnd="8dp"
+                app:tabPaddingTop="4dp"
+                app:tabPaddingBottom="4dp"/>
+        </com.google.android.material.appbar.AppBarLayout>
+
+        <!-- منطقة المحتوى تمتد حتى الحافة السفلية بلا أي padding -->
+        <FrameLayout
+            android:id="@+id/main_content"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="@android:color/black"
+            android:fitsSystemWindows="false"
+            android:clipToPadding="false"
+            android:clipChildren="false"/>
+    </LinearLayout>
+
+    <!-- القائمة الجانبية -->
+    <com.google.android.material.navigation.NavigationView
+        android:id="@+id/nav_view"
+        android:layout_width="300dp"
+        android:layout_height="match_parent"
+        android:layout_gravity="start"
+        android:background="@color/cardBackground"
+        app:itemIconTint="@color/unselectedIconTint"
+        app:itemTextColor="@color/navItemText"
+        app:headerLayout="@layout/nav_header"
+        app:menu="@menu/drawer_menu"/>
+</androidx.drawerlayout.widget.DrawerLayout>
