@@ -355,25 +355,29 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
         }
 
         // insets — تثبيت قيم ثابتة للـ ViewPager، فلا يتحرك المحتوى
+        // 1) للـ viewPager
         ViewCompat.setOnApplyWindowInsetsListener(viewPager) { v, insets ->
             val ig = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars())
             stableNavBottom = ig.bottom
             stableStatusTop = ig.top
+
             if (isLandscape()) {
                 v.setPadding(0, 0, 0, 0)
             } else {
-                // نبقي padding سفلية ثابتة دائمًا (حتى عند إخفاء الأشرطة)
                 v.setPadding(0, 0, 0, stableNavBottom)
             }
-            v
+
+            insets   // ✅ لازم نرجّع insets وليس v
         }
 
         // شريط التلاوة: حشوة إضافية بسيطة في الرأسي فقط لتجنب التصادم مع النظام
+        // 2) لشريط التلاوة audioControls
         ViewCompat.setOnApplyWindowInsetsListener(audioControls) { v, insets ->
             val bottomInset = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom
-            val bottomPadding = if (isLandscape()) 0 else bottomInset + 16
+            val bottomPadding = if (isLandscape()) 0 else bottomInset + dpToPx(16)
             v.updatePadding(bottom = bottomPadding)
-            insets
+
+            insets   // ✅ أيضًا نرجّع insets هنا
         }
 
         // أزرار
