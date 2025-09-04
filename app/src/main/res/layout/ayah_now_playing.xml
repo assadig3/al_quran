@@ -52,7 +52,7 @@
             android:paddingTop="2dp"
             android:paddingBottom="2dp"
             android:gravity="center_vertical"
-            android:textColor="@color/colorPrimaryDark"
+            android:textColor="@color/appBackground"
             android:textSize="13sp"
             android:singleLine="true"
             android:ellipsize="marquee"

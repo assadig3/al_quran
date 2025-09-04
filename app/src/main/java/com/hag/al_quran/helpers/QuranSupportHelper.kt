@@ -1,3 +1,4 @@
+// File: app/src/main/java/com/hag/al_quran/helpers/QuranSupportHelper.kt
 package com.hag.al_quran.helpers
 
 import android.app.ProgressDialog
@@ -26,7 +27,7 @@ class QuranSupportHelper(
     private val activity: QuranPageActivity,
     private val provider: MadaniPageProvider
 ) {
-    // ====== Cache: نحمّل JSON مرة واحدة ونحتفظ به ======
+
     private val quranArr: JSONArray by lazy {
         val jsonStr = activity.assets.open("quran.json").bufferedReader().use { it.readText() }
         JSONArray(jsonStr)
@@ -41,19 +42,27 @@ class QuranSupportHelper(
         JSONObject(jsonStr)
     }
 
-    // ====== تلاوة الآن (بانر) + شريط الآية ======
+    fun showAyahBanner(surah: Int, ayah: Int) {
+        val text = try { getAyahTextFromJson(surah, ayah) } catch (_: Throwable) { "—" }
+        showOrUpdateAyahBanner(surah, ayah, text)
+    }
+
     fun showOrUpdateAyahBanner(surah: Int, ayah: Int, text: String) {
-        activity.ayahBannerSurah?.text = getSurahNameByNumber(surah).orEmpty()
+        activity.ayahBannerSurah?.text = getSurahNameByNumber(surah).ifEmpty { "سورة $surah" }
         activity.ayahBannerNumber?.text = "آية $ayah"
         activity.ayahTextView?.apply {
             this.text = text
             isSelected = false
             post { isSelected = true }
         }
-        if (activity.ayahBanner?.visibility != View.VISIBLE) {
-            activity.ayahBanner?.visibility = View.VISIBLE
-            val slideIn = AnimationUtils.loadAnimation(activity, R.anim.slide_in_top)
-            activity.ayahBanner?.startAnimation(slideIn)
+
+        val banner = activity.ayahBanner
+        if (banner?.visibility != View.VISIBLE) {
+            banner?.let {
+                it.visibility = View.VISIBLE
+                val slideIn = AnimationUtils.loadAnimation(activity, R.anim.slide_in_top)
+                it.startAnimation(slideIn)
+            }
         }
     }
 
@@ -63,47 +72,47 @@ class QuranSupportHelper(
             override fun onAnimationStart(animation: android.view.animation.Animation?) {}
             override fun onAnimationRepeat(animation: android.view.animation.Animation?) {}
             override fun onAnimationEnd(animation: android.view.animation.Animation?) {
-                activity.ayahBanner?.visibility = View.GONE
+                activity.ayahBanner?.let { it.visibility = View.GONE }
             }
         })
         activity.ayahBanner?.startAnimation(out)
     }
 
     fun showAyahOptionsBar(surah: Int, ayah: Int, ayahText: String) {
-        activity.currentSurah = surah
-        activity.currentAyah = ayah
-        activity.ayahPreview?.apply {
-            text = ayahText
-            isSelected = false; isSelected = true
-            visibility = View.VISIBLE
-        }
-        activity.ayahOptionsBar.visibility = View.VISIBLE
+        activity.toolbar.visibility = View.VISIBLE
         activity.audioControls.visibility = View.VISIBLE
+
+        activity.ayahPreview?.text = ayahText
+        activity.ayahOptionsBar.visibility = View.VISIBLE
+        activity.ayahOptionsBar.alpha = 1f
+
+        activity.showBarsThenAutoHide(3000)
     }
 
     fun showToolbarAndHideAfterDelay() {
-        activity.toolbar.visibility = View.VISIBLE
-        activity.toolbarSpacer.visibility = View.GONE
-        activity.toolbar.animate().translationY(0f).setDuration(200).start()
-        activity.audioControls.visibility = View.VISIBLE
-        activity.audioControls.animate().translationY(0f).setDuration(200).start()
-        if (activity.hideHandler == null) activity.hideHandler = android.os.Handler(android.os.Looper.getMainLooper())
-        if (activity.hideRunnable == null) activity.hideRunnable = Runnable { hideToolbarAndBottomBar() }
-        activity.hideHandler?.removeCallbacks(activity.hideRunnable!!)
-        activity.hideHandler?.postDelayed(activity.hideRunnable!!, 3500)
+        activity.showBarsThenAutoHide(3500)
     }
 
     fun hideToolbarAndBottomBar() {
         activity.toolbar.visibility = View.GONE
-        activity.toolbarSpacer.visibility = View.VISIBLE
+
         activity.audioControls.animate()
             .translationY(activity.audioControls.height.toFloat())
-            .setDuration(200)
+            .alpha(0f)
+            .setDuration(180)
             .withEndAction { activity.audioControls.visibility = View.GONE }
             .start()
     }
 
-    // ====== JSON ======
+    fun showToolbarAndBottomBar() {
+        activity.toolbar.visibility = View.VISIBLE
+        activity.audioControls.apply {
+            visibility = View.VISIBLE
+            alpha = 0f
+            animate().translationY(0f).alpha(1f).setDuration(200).start()
+        }
+    }
+
     fun getAyahTextFromJson(surah: Int, ayah: Int): String {
         for (i in 0 until quranArr.length()) {
             val sObj = quranArr.getJSONObject(i)
@@ -135,7 +144,6 @@ class QuranSupportHelper(
         return name
     }
 
-    // ====== حدود الآيات (كاش) ======
     data class Seg(val x: Int, val y: Int, val w: Int, val h: Int)
     data class AyahBounds(val sura_id: Int, val aya_id: Int, val segs: List<Seg>)
 
@@ -157,8 +165,8 @@ class QuranSupportHelper(
         return res
     }
 
-    // ====== اختيار القارئ ======
     data class QariMini(val id: String, val name: String)
+    // استبدل هذه الدالة كاملة
     fun showQariPicker(onPicked: (QariMini) -> Unit) {
         val qaris = provider.getQaris()
         val names = qaris.map { it.name }.toTypedArray()
@@ -166,7 +174,11 @@ class QuranSupportHelper(
             .setTitle("اختر القارئ")
             .setItems(names) { _, which ->
                 val q = qaris[which]
-                activity.prefs.edit().putString("selected_qari", q.id).apply()
+                // خزّن دائمًا في المفتاح الموحّد الذي تقرأه QuranPageActivity
+                activity.prefs.edit()
+                    .putString(QuranPageActivity.KEY_QARI_ID, q.id.trim().lowercase())
+                    .apply()
+
                 onPicked(QariMini(q.id, q.name))
                 Toast.makeText(activity, "تم اختيار ${q.name}", Toast.LENGTH_SHORT).show()
             }
@@ -174,7 +186,6 @@ class QuranSupportHelper(
             .show()
     }
 
-    // ====== تكرار ======
     fun showRepeatDialog(audio: QuranAudioHelper) {
         val v = activity.layoutInflater.inflate(R.layout.dialog_repeat_options, null)
         val group = v.findViewById<RadioGroup>(R.id.repeatTypeGroup)
@@ -193,7 +204,6 @@ class QuranSupportHelper(
             .show()
     }
 
-    // ====== مشاركة ======
     fun shareCurrentAyah(surah: Int, ayah: Int) {
         val text = "سورة ${getSurahNameByNumber(surah)} - آية $ayah\n\n${getAyahTextFromJson(surah, ayah)}"
         activity.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
@@ -201,7 +211,6 @@ class QuranSupportHelper(
         }, "مشاركة"))
     }
 
-    // ====== تفسير ======
     private val tafsirList = listOf(
         "تفسير ابن كثير" to "ar-tafsir-ibn-kathir.json",
         "تفسير السعدي"   to "ar-tafsir-as-saadi.json",
@@ -232,7 +241,9 @@ class QuranSupportHelper(
             .setItems(names) { _, which ->
                 val file = files[which]
                 val url = links[file] ?: return@setItems
-                val pd = ProgressDialog(activity).apply { setMessage("جاري تحميل: ${names[which]}"); setCancelable(false); show() }
+                val pd = ProgressDialog(activity).apply {
+                    setMessage("جاري تحميل: ${names[which]}"); setCancelable(false); show()
+                }
                 downloadTafsirIfNeeded(activity, file, url) { ok, _ ->
                     activity.runOnUiThread {
                         pd.dismiss()
@@ -276,8 +287,8 @@ class QuranSupportHelper(
         tafsirAlertDialog = AlertDialog.Builder(activity).create().apply { setView(v); show() }
     }
 
-    // ====== تنزيلات (نطاق صفحة/سورة/جزء) ======
     private enum class DownloadScope { PAGE, SURAH, JUZ }
+
     private val JUZ_START_PAGES = intArrayOf(
         1, 22, 42, 62, 82, 102, 121, 141, 162, 182,
         201, 222, 242, 262, 282, 302, 322, 342, 362, 382,
@@ -314,7 +325,12 @@ class QuranSupportHelper(
         return start..end
     }
 
-    private fun buildUrlsFor(scope: DownloadScope, pageNow: Int, surahNow: Int, qariId: String): List<Pair<String, File>> {
+    private fun buildUrlsFor(
+        scope: DownloadScope,
+        pageNow: Int,
+        surahNow: Int,
+        qariId: String
+    ): List<Pair<String, File>> {
         val qari = provider.getQariById(qariId) ?: return emptyList()
         val pairs = mutableListOf<Pair<String, File>>()
 
@@ -383,7 +399,6 @@ class QuranSupportHelper(
         }
     }
 
-    // ====== تنزيل مفرد ======
     fun downloadOneAsync(message: String, url: String, out: File) {
         showDownloadUiStarting(message)
         thread {
@@ -403,7 +418,13 @@ class QuranSupportHelper(
         }
     }
 
-    // ====== تنزيل صفحات المصحف (اختياري) ======
+    // تنزيل صامت بدون واجهة
+    fun downloadOneSilentInBackground(url: String, out: File) {
+        thread {
+            try { downloadWithProgress(url, out) { _, _ -> } } catch (_: Exception) {}
+        }
+    }
+
     fun showDownloadAllPagesDialogIfNeeded() {
         val already = activity.prefs.getBoolean("pages_downloaded", false)
         if (already) return
@@ -466,7 +487,6 @@ class QuranSupportHelper(
         }
     }
 
-    // ====== شريط التحميل السفلي (UI) ======
     private fun showDownloadUiStarting(message: String) {
         activity.downloadRow.visibility = View.VISIBLE
         activity.downloadLabel.visibility = View.VISIBLE
@@ -491,7 +511,6 @@ class QuranSupportHelper(
         }
     }
 
-    // ====== تنزيل ملف مع تقدّم ======
     private fun downloadWithProgress(
         url: String,
         out: File,
@@ -501,7 +520,7 @@ class QuranSupportHelper(
             if (out.exists() && out.length() > 1024) return true to out.length()
             val conn = URL(url).openConnection()
             conn.connect()
-            val total = conn.contentLengthLong // قد يكون -1
+            val total = conn.contentLengthLong
             onProgress(0, total > 0)
             var downloaded = 0L
             conn.getInputStream().use { input ->
@@ -534,9 +553,10 @@ class QuranSupportHelper(
         }
     }
 
-    // ====== مساعدة ملفات القارئ (لتنزيل المخرجات) ======
     private fun qariDir(qariId: String): File {
-        val safe = qariId.lowercase().replace("\\s+".toRegex(), "_").replace("[^a-z0-9_\\-]".toRegex(), "")
+        val safe = qariId.lowercase()
+            .replace("\\s+".toRegex(), "_")
+            .replace("[^a-z0-9_\\-]".toRegex(), "")
         val dir = File(activity.getExternalFilesDir(null), "recitations/$safe")
         if (!dir.exists()) dir.mkdirs()
         return dir

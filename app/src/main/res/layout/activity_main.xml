@@ -6,40 +6,39 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:layoutDirection="locale"
-    android:fitsSystemWindows="false"
-    android:background="@android:color/black">
+    android:keepScreenOn="true">
 
     <!-- المحتوى الرئيسي -->
     <LinearLayout
-        android:id="@+id/root_container"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
         android:orientation="vertical"
-        android:fitsSystemWindows="false"
-        android:background="@android:color/black"
-        android:clipToPadding="false"
-        android:clipChildren="false">
+        android:background="@color/colorBackground">
 
-        <!-- AppBar: Toolbar + Tabs (نطبّق عليها الـ insets لاحقًا بالكود فقط) -->
+        <!-- AppBar: Toolbar + Tabs -->
         <com.google.android.material.appbar.AppBarLayout
             android:id="@+id/appBar"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:background="@color/colorPrimary"
-            android:elevation="4dp"
-            android:fitsSystemWindows="false">
+            android:fitsSystemWindows="true"
+            android:elevation="4dp">
 
+            <!-- Toolbar -->
             <com.google.android.material.appbar.MaterialToolbar
                 android:id="@+id/toolbar"
                 android:layout_width="match_parent"
-                android:layout_height="?attr/actionBarSize"
+                android:layout_height="60dp"
                 android:background="@color/colorPrimary"
+                android:paddingTop="@dimen/toolbar_padding_top"
                 app:title="@string/app_name"
-                app:titleTextColor="@color/textPrimary"
+                app:titleTextColor="@color/appBackground"
                 app:navigationIconTint="@color/textPrimary"
                 app:contentInsetStartWithNavigation="0dp"
+                app:titleTextAppearance="@style/ToolbarTitleLarge"
                 app:theme="@style/ThemeOverlay.MaterialComponents.Dark.ActionBar" />
 
+            <!-- تبويبات -->
             <com.google.android.material.tabs.TabLayout
                 android:id="@+id/topTabs"
                 android:layout_width="match_parent"
@@ -59,16 +58,13 @@
                 app:tabPaddingBottom="4dp"/>
         </com.google.android.material.appbar.AppBarLayout>
 
-        <!-- منطقة المحتوى تمتد حتى الحافة السفلية بلا أي padding -->
+        <!-- منطقة المحتوى -->
         <FrameLayout
             android:id="@+id/main_content"
             android:layout_width="match_parent"
             android:layout_height="0dp"
             android:layout_weight="1"
-            android:background="@android:color/black"
-            android:fitsSystemWindows="false"
-            android:clipToPadding="false"
-            android:clipChildren="false"/>
+            android:background="@color/colorBackground"/>
     </LinearLayout>
 
     <!-- القائمة الجانبية -->

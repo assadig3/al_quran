@@ -6,7 +6,7 @@ import android.content.Context
 class SearchRepository(private val context: Context) {
 
     private val ayat by lazy { SearchUtils.loadAllAyat(context) }
-    private val index by lazy { SearchIndex(ayat) }
+    private val index by lazy { SearchIndex(ayat, true) }
     private val surahNames by lazy { SearchUtils.loadSurahNames(context) }
 
     fun search(query: String, options: SearchOptions): List<SearchResultItem> {

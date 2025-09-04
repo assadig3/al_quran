@@ -181,4 +181,7 @@
 
     <color name="colorTextPrimary">#FFFFFF</color>
     <color name="colorTextSecondary">#B3FFFFFF</color>
+    <color name="quran_page_bg">#FFFDF7</color>  <!-- عاجي لطيف للقراءة -->
+
+
 </resources>

@@ -136,4 +136,6 @@
     <color name="qariNameColor">#FFFFFF</color>
     <color name="qariIconTint">#FFFFFF</color>
     <color name="qariItemBackground">#111111</color>
+    <color name="quran_page_bg">#121212</color>
+
 </resources>

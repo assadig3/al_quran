@@ -235,5 +235,8 @@
     <string name="downloading_quran_pages">Koran-Seiten werden heruntergeladen…</string>
     <string name="remaining_time">Verbleibende Zeit: …</string>
     <string name="please_rate_app">Bitte bewerten Sie die App, damit wir uns verbessern können 🌟</string>
+    <string name="reader">Reader</string>
+    <string name="play_pause">Play/Pause</string>
+    <string name="downloading_ellipsis">Downloading…</string>
 
 </resources>

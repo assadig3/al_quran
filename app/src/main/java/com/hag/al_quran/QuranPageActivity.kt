@@ -28,10 +28,12 @@ import androidx.recyclerview.widget.RecyclerView
 import androidx.viewpager2.widget.ViewPager2
 import com.google.android.material.appbar.MaterialToolbar
 import com.google.android.material.card.MaterialCardView
+import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import com.hag.al_quran.audio.MadaniPageProvider
 import com.hag.al_quran.helpers.QuranAudioHelper
 import com.hag.al_quran.helpers.QuranSupportHelper
 import com.hag.al_quran.search.AyahLocator
+import com.hag.al_quran.tafsir.TafsirManager
 import com.hag.al_quran.ui.PageImageLoader
 import com.hag.al_quran.utils.*
 import java.util.concurrent.ExecutorService
@@ -60,16 +62,68 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
         private const val ACT_STOP   = "com.hag.al_quran.NOTIF_STOP"
 
         private const val REQ_POST_NOTIFS = 8807
+
+        // مفتاح موحّد للقارئ
+        const val KEY_QARI_ID = "pref_qari_id"
+
+        const val PREF_REPEAT_AYAH = "pref_repeat_ayah_count"
+        const val PREF_REPEAT_PAGE = "pref_repeat_page_count"
     }
+
+    // ===================== Repeat Mode =====================
+    private enum class RepeatMode { OFF, PAGE, AYAH }
+    private val PREF_REPEAT_MODE = "pref_repeat_mode"
+    private var repeatMode: RepeatMode = RepeatMode.OFF
+
+    private fun loadRepeatMode(): RepeatMode =
+        when (prefs.getInt(PREF_REPEAT_MODE, 0)) {
+            1 -> RepeatMode.PAGE
+            2 -> RepeatMode.AYAH
+            else -> RepeatMode.OFF
+        }
+
+    private fun saveRepeatMode(mode: RepeatMode) {
+        val v = when (mode) {
+            RepeatMode.OFF  -> 0
+            RepeatMode.PAGE -> 1
+            RepeatMode.AYAH -> 2
+        }
+        prefs.edit().putInt(PREF_REPEAT_MODE, v).apply()
+    }
+
+    private fun updateRepeatIcon() {
+        when (repeatMode) {
+            RepeatMode.OFF -> {
+                btnRepeat.setImageResource(R.drawable.ic_repeat)
+                btnRepeat.alpha = 0.55f
+                btnRepeat.contentDescription = getString(R.string.repeat_off)
+            }
+            RepeatMode.PAGE -> {
+                btnRepeat.setImageResource(R.drawable.ic_repeat)
+                btnRepeat.alpha = 1f
+                btnRepeat.contentDescription = getString(R.string.repeat_page)
+            }
+            RepeatMode.AYAH -> {
+                btnRepeat.setImageResource(R.drawable.ic_repeat_one)
+                btnRepeat.alpha = 1f
+                btnRepeat.contentDescription = getString(R.string.repeat_ayah)
+            }
+        }
+        // تمرير الوضع الحالي لمساعد الصوت
+        audioHelper.repeatMode = when (repeatMode) {
+            RepeatMode.OFF  -> "off"
+            RepeatMode.PAGE -> "page"
+            RepeatMode.AYAH -> "ayah"
+        }
+    }
+    // =======================================================
 
     // UI
     lateinit var toolbar: MaterialToolbar
-    lateinit var toolbarSpacer: View
     lateinit var viewPager: ViewPager2
 
-    // حاوية وأسفل الشاشة
+    // أسفل الشاشة
     lateinit var bottomOverlays: LinearLayout
-    lateinit var bottomScrim: View
     lateinit var audioControlsCard: MaterialCardView
 
     // شريط التلاوة
@@ -77,15 +131,17 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
     lateinit var btnPlayPause: ImageButton
     lateinit var btnQari: TextView
     lateinit var audioDownload: ImageButton
+    lateinit var btnRepeat: ImageButton
 
-    // صف التحميل في شريط التلاوة (إن وُجد)
+    // صف التحميل في شريط التلاوة
     lateinit var downloadRow: LinearLayout
     lateinit var downloadProgress: ProgressBar
     lateinit var downloadLabel: TextView
 
     // شريط خيارات الآية
     lateinit var ayahOptionsBar: MaterialCardView
-    lateinit var btnTafsir: TextView
+    lateinit var btnDownloadTafsir: ImageButton
+
     lateinit var btnShareAyah: ImageButton
     lateinit var btnCopyAyah: ImageButton
     lateinit var btnPlayAyah: ImageButton
@@ -114,6 +170,7 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
     lateinit var provider: MadaniPageProvider
     lateinit var audioHelper: QuranAudioHelper
     lateinit var supportHelper: QuranSupportHelper
+    lateinit var tafsirManager: TafsirManager
 
     // حالة
     var currentQariId: String = "fares"
@@ -121,10 +178,8 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
     var currentSurah = 1
     var currentAyah = 1
 
-    // تحكم موحّد في الإظهار/الإخفاء
+    // تحكم بالأشرطة
     private var barsVisible = true
-    private var stableNavBottom = 0
-    private var stableStatusTop = 0
     var hideHandler: Handler? = null
     var hideRunnable: Runnable? = null
 
@@ -147,31 +202,27 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
     @Volatile private var bulkPrefetchRunning = false
     private var centerVisibleLocks = 0
 
+    // قياسات وإغلاق insets
+    private var toolbarHeight = 0
+    private var bottomOverlaysHeight = 0
+    private var topInsetLocked = 0
+    private var bottomInsetLocked = 0
+    private var insetsLocked = false
+
     // ========================== IMMERSIVE ==========================
     private fun isLandscape(): Boolean =
         resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
 
-    /** نُبقي decorFits=false دائمًا لتجنّب أي قفز في القياسات */
-    private fun applyDecorFitsFalseOnce() {
-        WindowCompat.setDecorFitsSystemWindows(window, false)
-    }
-
-    private fun controller(): WindowInsetsControllerCompat =
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            systemBarsBehavior =
-                WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-        }
-
     private fun enterImmersive() {
-        // لا نلمس decorFits — فقط نخفي أشرطة النظام
-        controller().hide(WindowInsetsCompat.Type.systemBars())
-        // الأشرطة العلوية/السفلية الخاصة بنا تُخفى بالتحريك (لا تغيّر layout)
-        animateBars(visible = false)
+        val c = WindowInsetsControllerCompat(window, window.decorView)
+        c.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        c.hide(WindowInsetsCompat.Type.systemBars())
     }
 
     private fun exitImmersive() {
-        controller().show(WindowInsetsCompat.Type.systemBars())
-        animateBars(visible = true)
+        val c = WindowInsetsControllerCompat(window, window.decorView)
+        c.show(WindowInsetsCompat.Type.systemBars())
     }
     // ===============================================================
 
@@ -238,81 +289,120 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_quran_page)
 
-        applyDecorFitsFalseOnce()
+        // إبقاء الشاشة مضاءة طوال فترة هذه الشاشة
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
+        WindowCompat.setDecorFitsSystemWindows(window, false)
+
         ensureNotificationChannel()
         requestNotifPermissionIfNeeded()
 
-        prefs = getSharedPreferences("quran_prefs", Context.MODE_PRIVATE)
-        provider = MadaniPageProvider(this)
+        // خدمات
+        prefs         = getSharedPreferences("quran_prefs", Context.MODE_PRIVATE)
+        provider      = MadaniPageProvider(this)
         supportHelper = QuranSupportHelper(this, provider)
-        audioHelper = QuranAudioHelper(this, provider, supportHelper, audioBgHandler)
+        audioHelper   = QuranAudioHelper(this, provider, supportHelper, audioBgHandler)
+        tafsirManager = TafsirManager(this)
 
+        // قراءة Intent
         val pageFromNew = intent.getIntExtra(EXTRA_TARGET_PAGE, 0)
         val pageFromOld = intent.getIntExtra("page", intent.getIntExtra("page_number", 0))
         val surahFromNew = intent.getIntExtra(EXTRA_TARGET_SURAH, 0)
-        val ayahFromNew = intent.getIntExtra(EXTRA_TARGET_AYAH, 0)
+        val ayahFromNew  = intent.getIntExtra(EXTRA_TARGET_AYAH, 0)
         val surahFromOld = intent.getIntExtra("surah_number", 0)
-        val ayahFromOld = intent.getIntExtra("ayah_number", 0)
+        val ayahFromOld  = intent.getIntExtra("ayah_number", 0)
 
         currentSurah = if (surahFromNew > 0) surahFromNew else if (surahFromOld > 0) surahFromOld else 1
         currentAyah  = if (ayahFromNew  > 0) ayahFromNew  else if (ayahFromOld  > 0) ayahFromOld  else 1
-
-        currentPage = when {
+        currentPage  = when {
             pageFromNew > 0 -> pageFromNew
             pageFromOld > 0 -> pageFromOld
             else -> try { AyahLocator.getPageFor(this, currentSurah, currentAyah) } catch (_: Throwable) { 1 }
         }.coerceIn(1, TOTAL_PAGES)
 
-        toolbar = findViewById(R.id.toolbar)
-        toolbarSpacer = findViewById(R.id.toolbarSpacer)
+        // ربط العناصر
+        toolbar           = findViewById(R.id.toolbar)
+        viewPager         = findViewById(R.id.pageViewPager)
+        bottomOverlays    = findViewById(R.id.bottomOverlays)
+        audioControlsCard = findViewById(R.id.audioControlsCard)
+
+        audioControls     = findViewById(R.id.audioControls)
+        btnPlayPause      = findViewById(R.id.btnPlayPause)
+        btnQari           = findViewById(R.id.btnQari)
+        audioDownload     = findViewById(R.id.audio_download)
+        btnRepeat         = findViewById(R.id.btnRepeat)
+
+        downloadRow       = findViewById(R.id.downloadRow)
+        downloadProgress  = findViewById(R.id.downloadProgress)
+        downloadLabel     = findViewById(R.id.downloadLabel)
+
+        ayahOptionsBar    = findViewById(R.id.ayahOptionsBar)
+        val btnTafsirMenu = findViewById<TextView>(R.id.btnTafsirMenu)
+        btnDownloadTafsir = findViewById(R.id.btnDownloadTafsir)
+
+        btnShareAyah      = findViewById(R.id.btnShareAyah)
+        btnCopyAyah       = findViewById(R.id.btnCopyAyah)
+        btnPlayAyah       = findViewById(R.id.btnPlayAyah)
+        btnCloseAyahBar   = findViewById(R.id.btnCloseOptions)
+        ayahPreview       = findViewById(R.id.ayahPreview)
+        initMarquee(ayahPreview)
+        ayahOptionsBar.visibility = View.GONE
+
+        // تحميل حالة القارئ والعدادات
+        currentQariId = prefs.getString(KEY_QARI_ID, currentQariId) ?: currentQariId
+        repeatMode = loadRepeatMode()
+        audioHelper.repeatCount = prefs.getInt(PREF_REPEAT_AYAH, 1).coerceIn(1, 99)
+        audioHelper.pageRepeatCount = prefs.getInt(PREF_REPEAT_PAGE, 1).coerceIn(1, 99)
+        updateRepeatIcon()
+
+        // Insets
+        ViewCompat.setOnApplyWindowInsetsListener(toolbar) { v, insets ->
+            val top = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
+            v.updatePadding(top = top)
+            WindowInsetsCompat.CONSUMED
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(bottomOverlays) { v, insets ->
+            val bottomBars = insets.getInsets(WindowInsetsCompat.Type.navigationBars()).bottom
+            val base = (12 * resources.displayMetrics.density).toInt()
+            v.updatePadding(bottom = bottomBars + base)
+            WindowInsetsCompat.CONSUMED
+        }
+        ViewCompat.setOnApplyWindowInsetsListener(viewPager) { v, insets ->
+            val navBottom = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.navigationBars()).bottom
+            if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE) {
+                v.setPadding(0, 0, 0, 0)
+            } else {
+                v.setPadding(0, 0, 0, navBottom)
+            }
+            (v as ViewGroup).clipToPadding = false
+            (v as ViewGroup).clipChildren  = false
+            WindowInsetsCompat.CONSUMED
+        }
+
+        // Toolbar
         setSupportActionBar(toolbar)
         supportActionBar?.setDisplayHomeAsUpEnabled(true)
         toolbar.setNavigationOnClickListener { finish() }
         supportActionBar?.title =
             supportHelper.getSurahNameForPage(currentPage).ifEmpty { getString(R.string.app_name) }
 
-        viewPager = findViewById(R.id.pageViewPager)
+        // ViewPager
+        viewPager.setBackgroundColor(ContextCompat.getColor(this, R.color.quran_page_bg))
         viewPager.offscreenPageLimit = 1
         (viewPager.getChildAt(0) as? RecyclerView)?.apply {
             itemAnimator = null
             setHasFixedSize(true)
             setItemViewCacheSize(4)
+            overScrollMode = RecyclerView.OVER_SCROLL_NEVER
         }
-
-        // ربط الأشرطة السفلية
-        bottomOverlays    = findViewById(R.id.bottomOverlays)
-        bottomScrim       = findViewById(R.id.bottomScrim)
-        audioControlsCard = findViewById(R.id.audioControlsCard)
-        bottomScrim.bringToFront()
-        bottomOverlays.bringToFront()
-
-        // عناصر شريط التلاوة
-        audioControls  = findViewById(R.id.audioControls)
-        btnPlayPause   = findViewById(R.id.btnPlayPause)
-        btnQari        = findViewById(R.id.btnQari)
-        audioDownload  = findViewById(R.id.audio_download)
-        downloadRow     = findViewById(R.id.downloadRow)
-        downloadProgress= findViewById(R.id.downloadProgress)
-        downloadLabel   = findViewById(R.id.downloadLabel)
-
-        // شريط خيارات الآية
-        ayahOptionsBar   = findViewById(R.id.ayahOptionsBar)
-        btnTafsir        = findViewById(R.id.btnTafsir)
-        btnShareAyah     = findViewById(R.id.btnShareAyah)
-        btnCopyAyah      = findViewById(R.id.btnCopyAyah)
-        btnPlayAyah      = findViewById(R.id.btnPlayAyah)
-        btnCloseAyahBar  = findViewById(R.id.btnCloseOptions)
-        ayahPreview      = findViewById(R.id.ayahPreview)
-        initMarquee(ayahPreview)
-        ayahOptionsBar.visibility = View.GONE
 
         // بانر الآن يتلى
         val root = findViewById<ViewGroup>(android.R.id.content)
         val banner = layoutInflater.inflate(R.layout.ayah_now_playing, root, false)
-        ayahBanner        = banner
-        ayahTextView      = banner.findViewById(R.id.ayahText)
-        ayahBannerSurah   = banner.findViewById(R.id.surahName)
-        ayahBannerNumber  = banner.findViewById(R.id.ayahNumber)
+        ayahBanner       = banner
+        ayahTextView     = banner.findViewById(R.id.ayahText)
+        ayahBannerSurah  = banner.findViewById(R.id.surahName)
+        ayahBannerNumber = banner.findViewById(R.id.ayahNumber)
         initMarquee(ayahTextView)
         banner.findViewById<ImageButton>(R.id.btnCloseBanner)
             .setOnClickListener { supportHelper.hideAyahBanner() }
@@ -354,37 +444,36 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
             Toast.makeText(this, "سيستمر التنزيل في الخلفية.", Toast.LENGTH_SHORT).show()
         }
 
-        // insets — تثبيت قيم ثابتة للـ ViewPager، فلا يتحرك المحتوى
-        // 1) للـ viewPager
-        ViewCompat.setOnApplyWindowInsetsListener(viewPager) { v, insets ->
-            val ig = insets.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.systemBars())
-            stableNavBottom = ig.bottom
-            stableStatusTop = ig.top
+        // === زر قائمة التفسير (Popup) + زر التحميل ===
+        setupTafsirMenuButton(btnTafsirMenu)
 
-            if (isLandscape()) {
-                v.setPadding(0, 0, 0, 0)
-            } else {
-                v.setPadding(0, 0, 0, stableNavBottom)
+        // زر التكرار (قصير/طويل)
+        btnRepeat.setOnClickListener {
+            repeatMode = when (repeatMode) {
+                RepeatMode.OFF  -> RepeatMode.PAGE
+                RepeatMode.PAGE -> RepeatMode.AYAH
+                RepeatMode.AYAH -> RepeatMode.OFF
             }
-
-            insets   // ✅ لازم نرجّع insets وليس v
+            saveRepeatMode(repeatMode)
+            updateRepeatIcon()
+            setAllBarsVisible(true, 3000)
+            val msg = when (repeatMode) {
+                RepeatMode.OFF  -> getString(R.string.repeat_off)
+                RepeatMode.PAGE -> getString(R.string.repeat_page)
+                RepeatMode.AYAH -> getString(R.string.repeat_ayah)
+            }
+            Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
+        }
+        btnRepeat.setOnLongClickListener {
+            showRepeatCountDialog()
+            setAllBarsVisible(true, 3000)
+            true
         }
 
-        // شريط التلاوة: حشوة إضافية بسيطة في الرأسي فقط لتجنب التصادم مع النظام
-        // 2) لشريط التلاوة audioControls
-        ViewCompat.setOnApplyWindowInsetsListener(audioControls) { v, insets ->
-            val bottomInset = insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom
-            val bottomPadding = if (isLandscape()) 0 else bottomInset + dpToPx(16)
-            v.updatePadding(bottom = bottomPadding)
-
-            insets   // ✅ أيضًا نرجّع insets هنا
-        }
-
-        // أزرار
+        // أزرار شريط الآية
         btnPlayAyah.setOnClickListener {
             if (audioHelper.isAyahPlaying) {
-                audioHelper.stopSingleAyah()
-                updateNotification(isPlaying = false)
+                audioHelper.stopSingleAyah(); updateNotification(isPlaying = false)
             } else {
                 audioHelper.playSingleAyah(currentSurah, currentAyah, currentQariId)
                 updateNotification(
@@ -404,18 +493,52 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
             Toast.makeText(this, "تم نسخ الآية!", Toast.LENGTH_SHORT).show()
             setAllBarsVisible(true, 3000)
         }
-        btnTafsir.setOnClickListener { supportHelper.openTafsir(currentSurah, currentAyah) }
         btnShareAyah.setOnClickListener { supportHelper.shareCurrentAyah(currentSurah, currentAyah) }
         btnCloseAyahBar.setOnClickListener { showAyahOptions(false) }
 
-        // اختيار القارئ
+        // اختيار القارئ (مفتاح موحّد KEY_QARI_ID)
         btnQari.text = provider.getQariById(currentQariId)?.name ?: "فارس عباد"
         btnQari.setOnClickListener {
             supportHelper.showQariPicker { qari ->
+                // 1) حدّث المعرّف والاسم واحفظ في التفضيلات
+                val oldWasPagePlaying = audioHelper.isPlaying
+                val oldWasAyahPlaying = audioHelper.isAyahPlaying
+                val page = currentPage
+                val sura = currentSurah
+                val ayah = currentAyah
+
                 currentQariId = qari.id
-                btnQari.text = qari.name
-                setAllBarsVisible(true, 3000)
-                debouncePrepareQueue(currentPage)
+                btnQari.text  = qari.name
+                prefs.edit().putString(KEY_QARI_ID, currentQariId).apply()
+
+                // 2) أوقف أي تشغيل قائم ونظّف الطابور والمشغّل
+                audioHelper.stopAllPlaybackAndClearQueue()
+
+                // 3) أعِد التحضير بالقارئ الجديد
+                audioHelper.prepareAudioQueueForPage(page, currentQariId)
+
+                // 4) لو كان يشغّل من قبل، أعِد التشغيل بالقارئ الجديد
+                when {
+                    oldWasPagePlaying -> {
+                        audioHelper.startPagePlayback(page, currentQariId)
+                        updateNotification(isPlaying = true)
+                    }
+                    oldWasAyahPlaying -> {
+                        audioHelper.playSingleAyah(sura, ayah, currentQariId)
+                        updateNotification(
+                            isPlaying = true,
+                            surah = sura,
+                            ayah  = ayah,
+                            customText = ayahPreview?.text?.toString()
+                        )
+                    }
+                    else -> {
+                        // إن لم يكن هناك تشغيل، فقط ضَمِن التحضير السريع
+                        debouncePrepareQueue(page, immediate = true)
+                    }
+                }
+
+                setAllBarsVisible(true, 2000)
             }
         }
 
@@ -423,18 +546,20 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
             supportHelper.showDownloadScopeDialog(currentPage, currentSurah, currentQariId)
         }
 
-        // تشغيل/إيقاف
+        // زر التشغيل/الإيقاف
         btnPlayPause.setOnClickListener {
             setAllBarsVisible(true, 3000)
             if (audioHelper.isPlaying) {
-                audioHelper.pausePagePlayback()
-                updateNotification(isPlaying = false)
+                audioHelper.pausePagePlayback(); updateNotification(isPlaying = false)
             } else {
                 val resumed = audioHelper.resumePagePlayback()
                 if (!resumed) audioHelper.startPagePlayback(currentPage, currentQariId)
                 updateNotification(isPlaying = true)
             }
         }
+
+        // تثبيت قياسات الأشرطة
+        prepareBarsOverlay()
 
         // Adapter
         val pageNames = (1..TOTAL_PAGES).map { "page_$it.webp" }
@@ -445,7 +570,9 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
             onAyahClick = { s, a, t ->
                 currentSurah = s
                 currentAyah  = a
-                supportHelper.showAyahOptionsBar(s, a, t)
+                val text = try { supportHelper.getAyahTextFromJson(s, a) } catch (_: Throwable) { t ?: "" }
+                ayahPreview?.text = text
+                ayahPreview?.isSelected = true
                 showAyahOptions(true)
                 setAllBarsVisible(true, 3000)
             },
@@ -488,34 +615,32 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
         hideHandler = Handler(Looper.getMainLooper())
         hideRunnable = Runnable { setAllBarsVisible(false) }
 
-        // بداية: عرض مؤقت ثم إخفاء
         setAllBarsVisible(true, 3000)
-
         debouncePrepareQueue(currentPage, immediate = true)
-
         if (!arePagesCached()) startBulkPagesPrefetch(parallelism = 6)
+    }
 
-        // ابدأ بوضع ملء الشاشة (دون تغيير decorFits)
-        if (isLandscape()) enterImmersive() else exitImmersive()
+
+    override fun onUserInteraction() {
+        super.onUserInteraction()
+        if (!barsVisible) setAllBarsVisible(true, 3000)
     }
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus && isLandscape()) enterImmersive()
+        if (hasFocus && isLandscape() && !barsVisible) enterImmersive()
     }
 
     override fun onResume() {
         super.onResume()
-        if (isLandscape()) enterImmersive() else exitImmersive()
+        if (isLandscape() && !barsVisible) enterImmersive() else exitImmersive()
     }
 
     @SuppressLint("UnspecifiedRegisterReceiverFlag")
     override fun onStart() {
         super.onStart()
         val filter = IntentFilter().apply {
-            addAction(ACT_PLAY)
-            addAction(ACT_PAUSE)
-            addAction(ACT_STOP)
+            addAction(ACT_PLAY); addAction(ACT_PAUSE); addAction(ACT_STOP)
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             registerReceiver(notifReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
@@ -534,9 +659,7 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
     private fun ensureNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val ch = NotificationChannel(
-                CHANNEL_ID,
-                "تشغيل التلاوة",
-                NotificationManager.IMPORTANCE_LOW
+                CHANNEL_ID, "تشغيل التلاوة", NotificationManager.IMPORTANCE_LOW
             ).apply { description = "إشعار تشغيل/إيقاف تلاوة القرآن" }
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
                 .createNotificationChannel(ch)
@@ -580,8 +703,7 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
         }
 
         val contentPI = PendingIntent.getActivity(
-            this,
-            100,
+            this, 100,
             Intent(this, QuranPageActivity::class.java),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
@@ -613,13 +735,9 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
                 this,
                 Manifest.permission.POST_NOTIFICATIONS
             ) == PackageManager.PERMISSION_GRANTED
-        } else {
-            true
-        }
+        } else true
 
-        if (canPost) {
-            NotificationManagerCompat.from(this).notify(NOTIF_ID, builder.build())
-        }
+        if (canPost) NotificationManagerCompat.from(this).notify(NOTIF_ID, builder.build())
     }
 
     // ============================ MENU ============================
@@ -631,7 +749,9 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
     }
 
     override fun onCreateOptionsMenu(menu: Menu?): Boolean {
-        menuInflater.inflate(R.menu.menu_page_viewer, menu); return true
+        // القائمة أصبحت تحتوي فقط على زر حفظ الصفحة
+        menuInflater.inflate(R.menu.menu_page_viewer, menu)
+        return true
     }
 
     override fun onPrepareOptionsMenu(menu: Menu): Boolean {
@@ -658,9 +778,6 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
                 }
                 true
             }
-            R.id.action_download_tafsirs -> { supportHelper.showTafsirDownloadDialog(); true }
-            R.id.action_toggle_repeat   -> { supportHelper.showRepeatDialog(audioHelper); true }
-            R.id.action_select_tafsir   -> { supportHelper.showTafsirPickerDialog(); true }
             else -> super.onOptionsItemSelected(item)
         }
     }
@@ -685,60 +802,99 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
         }
     }
 
-    // ===================== تحكم موحّد بالأشرطة =====================
-    private fun setAllBarsVisible(visible: Boolean, autoHideMs: Int? = null) {
-        barsVisible = visible
-        if (visible) exitImmersive() else enterImmersive()
-
-        hideRunnable?.let { r ->
-            hideHandler?.removeCallbacks(r)
-            autoHideMs?.let { ms -> hideHandler?.postDelayed(r, ms.toLong()) }
+    /** تثبيت الأشرطة كطبقات تطفو عبر translation فقط */
+    private fun prepareBarsOverlay() {
+        // قياسات أولية
+        toolbar.post {
+            toolbarHeight = toolbar.height
+            ViewCompat.setOnApplyWindowInsetsListener(toolbar) { v, insets ->
+                if (!insetsLocked) {
+                    topInsetLocked = insets.getInsets(WindowInsetsCompat.Type.statusBars()).top
+                }
+                v.updatePadding(top = topInsetLocked)
+                WindowInsetsCompat.CONSUMED
+            }
         }
+        bottomOverlays.post { bottomOverlaysHeight = bottomOverlays.height }
+
+        // إظهار مبدئي
+        toolbar.visibility = View.VISIBLE
+        bottomOverlays.visibility = View.VISIBLE
+        audioControlsCard.visibility = View.VISIBLE
+        ayahOptionsBar.visibility = View.GONE
+
+        toolbar.alpha = 1f
+        bottomOverlays.alpha = 1f
+        audioControlsCard.alpha = 1f
+
+        toolbar.post { insetsLocked = true }
     }
 
-    /** إظهار/إخفاء فعلي للأشرطة بحركة/شفافية دون تغيير قياسات */
-    private fun animateBars(visible: Boolean) {
-        val duration = 180L
-        // علوي
+    // ===================== تحكم موحّد في الأشرطة =====================
+    private fun setAllBarsVisible(visible: Boolean, autoHideMs: Int? = null) {
+        barsVisible = visible
+
+        val ctrl = WindowInsetsControllerCompat(window, window.decorView)
+        ctrl.systemBarsBehavior =
+            WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        if (isLandscape()) {
+            if (visible) ctrl.show(WindowInsetsCompat.Type.systemBars())
+            else ctrl.hide(WindowInsetsCompat.Type.systemBars())
+        } else {
+            ctrl.show(WindowInsetsCompat.Type.systemBars())
+        }
+
+        val dur = 180L
+
+        // الشريط العلوي
+        if (visible) toolbar.visibility = View.VISIBLE
+        val topH = (if (toolbar.height > 0) toolbar.height else toolbarHeight) + topInsetLocked
+        val tYTop = if (visible) 0f else -topH.toFloat()
         toolbar.animate()
-            .translationY(if (visible) 0f else -(toolbar.height + stableStatusTop).toFloat())
+            .translationY(tYTop)
             .alpha(if (visible) 1f else 0f)
-            .setDuration(duration)
+            .setDuration(dur)
+            .withEndAction { if (!visible && isLandscape()) toolbar.visibility = View.GONE }
             .start()
 
-        // سفلي (الحاوية كاملة تطفو فوق الصفحة)
-        val bottomHeight = bottomOverlays.height + stableNavBottom
+        // الشريط السفلي
+        if (visible) {
+            bottomOverlays.visibility = View.VISIBLE
+            audioControlsCard.visibility = View.VISIBLE
+        }
+        val bottomH =
+            (if (bottomOverlays.height > 0) bottomOverlays.height else bottomOverlaysHeight) + bottomInsetLocked
+        val tYBottom = if (visible) 0f else bottomH.toFloat()
+
         bottomOverlays.animate()
-            .translationY(if (visible) 0f else bottomHeight.toFloat())
+            .translationY(tYBottom)
             .alpha(if (visible) 1f else 0f)
-            .setDuration(duration)
-            .start()
-        bottomScrim.animate()
-            .alpha(if (visible) 1f else 0f)
-            .setDuration(duration)
+            .setDuration(dur)
+            .withEndAction { if (!visible) bottomOverlays.visibility = View.GONE }
             .start()
 
-        // شريط خيارات الآية بنفس الحركة
-        ayahOptionsBar.animate()
-            .translationY(if (visible) 0f else bottomHeight.toFloat())
+        audioControlsCard.animate()
+            .translationY(tYBottom)
             .alpha(if (visible) 1f else 0f)
-            .setDuration(duration)
+            .setDuration(dur)
+            .withEndAction { if (!visible) audioControlsCard.visibility = View.GONE }
             .start()
+
+        // إخفاء تلقائي
+        hideRunnable?.let { r ->
+            hideHandler?.removeCallbacks(r)
+            autoHideMs?.let { ms ->
+                if (!(audioHelper.isPlaying || audioHelper.isAyahPlaying)) {
+                    hideHandler?.postDelayed(r, ms.toLong())
+                }
+            }
+        }
     }
 
     private fun showAyahOptions(show: Boolean) {
-        // لا نستخدم VISIBLE/GONE حتى لا نعيد القياس — نكتفي بالشفافية/الترجمة
-        if (show) {
-            ayahOptionsBar.visibility = View.VISIBLE
-            ayahOptionsBar.animate().alpha(1f).translationY(0f).setDuration(150L).start()
-        } else {
-            ayahOptionsBar.animate()
-                .alpha(0f)
-                .translationY((bottomOverlays.height + stableNavBottom).toFloat())
-                .setDuration(150L)
-                .withEndAction { ayahOptionsBar.visibility = View.VISIBLE /* نبقيه مرسوماً */ }
-                .start()
-        }
+        ayahOptionsBar.clearAnimation()
+        ayahOptionsBar.alpha = 1f
+        ayahOptionsBar.visibility = if (show) View.VISIBLE else View.GONE
     }
 
     // ===================== CENTER LOADER =====================
@@ -766,7 +922,7 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
         }
     }
 
-    // ===================== PREFETCH PAGES (Optional) =====================
+    // ===================== PREFETCH PAGES =====================
     private fun arePagesCached(): Boolean = prefs.getBoolean(KEY_PAGES_CACHED, false)
     private fun setPagesCachedDone() { prefs.edit().putBoolean(KEY_PAGES_CACHED, true).apply() }
 
@@ -858,5 +1014,107 @@ class QuranPageActivity : BaseActivity(), CenterLoaderHost {
                 }
             }.start()
         }
+    }
+
+    fun showBarsThenAutoHide(delayMs: Int = 3500) {
+        setAllBarsVisible(true, delayMs)
+    }
+
+    private fun dpToPx(dp: Int): Int =
+        (dp * resources.displayMetrics.density).toInt()
+
+    // ====================== قائمة التفسير (Popup) ======================
+    private fun setupTafsirMenuButton(btnTafsirMenu: TextView) {
+        btnTafsirMenu.text = try {
+            tafsirManager.getSelectedName()
+        } catch (_: Throwable) {
+            tafsirManager.names().getOrNull(tafsirManager.getSelectedIndex()) ?: getString(R.string.tafsir)
+        }
+
+        btnTafsirMenu.setOnClickListener { v ->
+            val names = tafsirManager.names()
+            val popup = android.widget.PopupMenu(this, v)
+            names.forEachIndexed { idx, name -> popup.menu.add(0, idx, idx, name) }
+
+            popup.setOnMenuItemClickListener { mi ->
+                val i = mi.itemId
+                tafsirManager.setSelectedIndex(i)
+                btnTafsirMenu.text = names[i]
+
+                if (currentSurah > 0 && currentAyah > 0) {
+                    val ayahText = try {
+                        supportHelper.getAyahTextFromJson(currentSurah, currentAyah)
+                    } catch (_: Throwable) {
+                        ayahPreview?.text?.toString().orEmpty()
+                    }
+                    tafsirManager.fetchFromCDN(currentSurah, currentAyah) { tafsirText ->
+                        runOnUiThread {
+                            tafsirManager.showAyahDialog(currentSurah, currentAyah, ayahText, tafsirText)
+                        }
+                    }
+                }
+                true
+            }
+            popup.show()
+        }
+
+        btnDownloadTafsir.setOnClickListener {
+            tafsirManager.showDownloadDialog(this)
+        }
+    }
+
+    // ====================== نافذة عدّادات التكرار ======================
+    private fun showRepeatCountDialog() {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dpToPx(16), dpToPx(8), dpToPx(16), 0)
+        }
+
+        fun label(t: String) = TextView(this).apply {
+            text = t
+            textSize = 16f
+            setPadding(0, dpToPx(8), 0, dpToPx(4))
+        }
+
+        val ayahPicker = NumberPicker(this).apply {
+            minValue = 1; maxValue = 99
+            value = prefs.getInt(PREF_REPEAT_AYAH, audioHelper.repeatCount).coerceIn(1, 99)
+            setFormatter { "$it ×" }
+        }
+        val pagePicker = NumberPicker(this).apply {
+            minValue = 1; maxValue = 99
+            value = prefs.getInt(PREF_REPEAT_PAGE, audioHelper.pageRepeatCount).coerceIn(1, 99)
+            setFormatter { "$it ×" }
+        }
+
+        content.addView(label(getString(R.string.repeat_ayah)))
+        content.addView(ayahPicker)
+        content.addView(label(getString(R.string.repeat_page)))
+        content.addView(pagePicker)
+
+        MaterialAlertDialogBuilder(this)
+            .setTitle(getString(R.string.repeat_settings_title))
+            .setView(content)
+            .setPositiveButton(getString(R.string.ok)) { _, _ ->
+                audioHelper.repeatCount = ayahPicker.value
+                audioHelper.pageRepeatCount = pagePicker.value
+                prefs.edit()
+                    .putInt(PREF_REPEAT_AYAH, ayahPicker.value)
+                    .putInt(PREF_REPEAT_PAGE, pagePicker.value)
+                    .apply()
+
+                if (repeatMode == RepeatMode.OFF) {
+                    repeatMode = RepeatMode.AYAH
+                    saveRepeatMode(repeatMode)
+                    updateRepeatIcon()
+                }
+                Toast.makeText(
+                    this,
+                    "تكرار الآية: ${ayahPicker.value}× • تكرار الصفحة: ${pagePicker.value}×",
+                    Toast.LENGTH_SHORT
+                ).show()
+            }
+            .setNegativeButton(getString(R.string.cancel), null)
+            .show()
     }
 }

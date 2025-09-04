@@ -137,7 +137,8 @@ class MainActivity : BaseActivity() {
         setupEdgeToEdge()
 
         // إبقاء الشاشة شغالة
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) // موجود سابقًا
+        findViewById<View>(android.R.id.content)?.keepScreenOn = true   // ✅ إضافة على مستوى الـ View
 
         // Toolbar + Drawer
         setSupportActionBar(toolbar)
@@ -200,9 +201,14 @@ class MainActivity : BaseActivity() {
                 }
                 R.id.rate -> { openAppInPlayStore(); true }
                 R.id.other_apps -> {
-                    startActivity(Intent(Intent.ACTION_VIEW,
-                        Uri.parse("https://play.google.com/store/apps/developer?id=afagamro"))); true
+                    // مثال: فتح صفحة مطورك في Google Play
+                    val intent = Intent(Intent.ACTION_VIEW).apply {
+                        data = Uri.parse("https://play.google.com/store/apps/developer?id=afagamro")
+                    }
+                    startActivity(intent)
+                    true
                 }
+
                 R.id.nav_language -> { showLanguageDialog(); true }
                 R.id.action_exit -> { showExitDialog(); true }
                 else -> false
@@ -231,6 +237,9 @@ class MainActivity : BaseActivity() {
 
     override fun onResume() {
         super.onResume()
+        // ✅ إعادة فرض العلم عند عودة الـ Activity للمقدمة (بعض الأنظمة تزيله مؤقتًا)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+
         // لو كان التحديث المرن مُنزّلاً بالفعل ولم تُطبّق إعادة التشغيل، أظهر زرّ “إعادة التشغيل”
         appUpdateManager.appUpdateInfo.addOnSuccessListener { info ->
             if (info.installStatus() == InstallStatus.DOWNLOADED) {
@@ -245,6 +254,7 @@ class MainActivity : BaseActivity() {
     override fun onDestroy() {
         super.onDestroy()
         try { appUpdateManager.unregisterListener(installStateUpdatedListener) } catch (_: Exception) {}
+        // ملاحظة: لا نزيل FLAG_KEEP_SCREEN_ON هنا لأن الشاشة ستنطفئ طبيعيًا عند مغادرة الـ Activity.
     }
 
     // =============== Tabs ===============

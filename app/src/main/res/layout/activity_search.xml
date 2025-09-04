@@ -10,15 +10,20 @@
     android:textDirection="anyRtl"
     android:background="?attr/colorSurface">
 
-    <!-- شريط علوي (بدون عنوان) -->
+    <!-- Toolbar باتجاه RTL ليكون زر التنقل في اليمين -->
     <com.google.android.material.appbar.MaterialToolbar
         android:id="@+id/toolbar"
         android:layout_width="match_parent"
         android:layout_height="?attr/actionBarSize"
+        android:layoutDirection="rtl"
+        android:background="?attr/colorSurface"
         app:title=""
-        app:navigationIcon="@drawable/ic_arrow_back" />
+        app:navigationIcon="@drawable/ic_arrow_back"
+        app:navigationIconTint="?attr/colorOnSurface"
+        app:contentInsetStartWithNavigation="0dp"
+        app:elevation="4dp" />
 
-    <!-- بطاقة: حقل البحث + زر الأيقونة (مُصغّرين) -->
+    <!-- بقية التخطيط كما هو ... -->
     <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
@@ -36,7 +41,6 @@
             android:gravity="center_vertical"
             android:baselineAligned="false">
 
-            <!-- حقل البحث (مصغّر) -->
             <EditText
                 android:id="@+id/searchInput"
                 android:layout_width="0dp"
@@ -56,7 +60,6 @@
                 android:background="@null"
                 android:backgroundTint="@android:color/transparent" />
 
-            <!-- زر البحث: أيقونة فقط (مصغّر) -->
             <ImageButton
                 android:id="@+id/btnSearch"
                 android:layout_width="32dp"
@@ -71,7 +74,6 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- بطاقة عدّاد النتائج (تظهر/تُخفى من الكود) -->
     <com.google.android.material.card.MaterialCardView
         android:id="@+id/counterCard"
         android:layout_width="match_parent"
@@ -109,7 +111,6 @@
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
 
-    <!-- مؤشر التحميل -->
     <ProgressBar
         android:id="@+id/progress"
         style="?android:attr/progressBarStyle"
@@ -119,7 +120,6 @@
         android:layout_gravity="center_horizontal"
         android:visibility="gone" />
 
-    <!-- رسالة فارغة/تلميح: مخفية كما طلبت -->
     <TextView
         android:id="@+id/emptyView"
         android:layout_width="match_parent"
@@ -128,7 +128,6 @@
         android:text="@string/search_hint"
         android:visibility="gone" />
 
-    <!-- قائمة النتائج -->
     <androidx.recyclerview.widget.RecyclerView
         android:id="@+id/resultsList"
         android:layout_width="match_parent"

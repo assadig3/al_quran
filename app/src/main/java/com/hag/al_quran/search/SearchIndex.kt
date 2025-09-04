@@ -1,129 +1,161 @@
 package com.hag.al_quran.search
 
-class SearchIndex(private val ayat: List<AyahItem>) {
+import kotlin.math.min
+
+class SearchIndex(baseAyat: List<AyahItem>, includeBasmala: Boolean = true) {
 
     data class AyahItem(
         val surah: Int,
-        val ayah: Int,
+        val ayah: Int,   // للبسملة نضع 0 (آية افتراضية)
         val page: Int,
         val text: String,
-        val norm: String // النص بعد التطبيع وإزالة التشكيل (باستخدام SearchUtils.normalizeArabic/stripTashkeel)
+        val norm: String
     )
 
-    // ================= بحث =================
-
-    /** بحث جزئي (اختياري) */
-    fun searchPartial(qRaw: String): List<AyahItem> {
-        val q = SearchUtils.normalizeArabic(SearchUtils.stripTashkeel(qRaw))
-        if (q.isEmpty()) return emptyList()
-        return ayat.filter { it.norm.contains(q) }
+    private val tokenRe = Regex("[\\p{L}\\p{Nd}]+")
+    companion object {
+        private const val MAX_PREFIX = 6   // كان 4 -> سبب البطء
+        private const val MIN_PREFIX = 2
     }
 
-    /** بحث كلمة كاملة (المعتمد) */
-    fun searchWholeWord(qRaw: String): List<AyahItem> {
-        val q = SearchUtils.normalizeArabic(SearchUtils.stripTashkeel(qRaw))
-        if (q.isEmpty()) return emptyList()
-        return ayat.filter { containsWholeWord(it.norm, q) }
-    }
+    // القائمة النهائية بعد إضافة البسملات الافتراضية
+    private val ayat: List<AyahItem>
 
-    // حدود كلمة عربية بعد التطبيع
-    private fun isArabicLetterNormalized(ch: Char): Boolean = ch in '\u0621'..'\u064A'
+    // فهارس مقلوبة: كلمة/جذر/بادئة -> فهارس الآيات
+    private val tokenToAyahs: Map<String, IntArray>
+    private val stemToAyahs: Map<String, IntArray>
+    private val prefixToAyahs: Map<String, IntArray>
 
-    private fun containsWholeWord(textNorm: String, queryNorm: String): Boolean {
-        val qLen = queryNorm.length
-        if (qLen == 0 || qLen > textNorm.length) return false
-        var from = 0
-        while (true) {
-            val idx = textNorm.indexOf(queryNorm, from)
-            if (idx < 0) return false
-            val beforeOk = (idx == 0) || !isArabicLetterNormalized(textNorm[idx - 1])
-            val afterPos = idx + qLen
-            val afterOk = (afterPos >= textNorm.length) || !isArabicLetterNormalized(textNorm[afterPos])
-            if (beforeOk && afterOk) return true
-            from = idx + 1
-        }
-    }
+    // توكنات لكل آية + map (سورة،آية) -> index
+    private val ayahTokens: Array<List<String>>
+    private val idToIdx = HashMap<Int, Int>()
 
-    // ================= إحصاء مرات الذكر =================
+    init {
+        // ===== 1) دمج البسملات الافتراضية =====
+        val list = ArrayList<AyahItem>(baseAyat.size + 120)
+        list.addAll(baseAyat)
 
-    enum class CountMode {
-        /** الكلمة نفسها فقط ككلمة مستقلة (لا يحتسب: والله/بالله/لله/فلله …) */
-        WORD_ONLY,
-
-        /** يحسب الكلمة + اللواصق الأحادية (و ف ب ك ل س ت) + خاصية استبدال (الـ) بـ (لل) للكلمات المعرّفة */
-        WITH_PREFIXES
-    }
-
-    data class AyahCount(
-        val surah: Int,
-        val ayah: Int,
-        val page: Int,
-        val count: Int
-    )
-
-    data class CountSummary(
-        val totalOccurrences: Int,  // إجمالي مرات الذكر
-        val ayahMatches: Int,       // عدد الآيات التي وردت فيها
-        val perAyah: List<AyahCount>
-    )
-
-    private val PREFIXES: Set<Char> = setOf('و','ف','ب','ك','ل','س','ت')
-
-    /**
-     * يعدّ مرات ظهور كلمة (أو صيغة اسم الجلالة) وفق النمط المطلوب.
-     *
-     * - WORD_ONLY: "الله" فقط ككلمة مستقلة.
-     * - WITH_PREFIXES: يحسب أيضًا: والله، فالله، بالله، كالله، سالله، تالله،
-     *   وكذلك حالة إدغام "ال" بعد لام الجر: لله، ولله، فلله، … (تعميم لأي كلمة تبدأ بـ"ال").
-     */
-    fun countOccurrences(queryRaw: String, mode: CountMode = CountMode.WORD_ONLY): CountSummary {
-        val q = SearchUtils.normalizeArabic(SearchUtils.stripTashkeel(queryRaw))
-        if (q.isBlank()) return CountSummary(0, 0, emptyList())
-
-        // محضِّر أشكال بديلة في حال السماح باللواصق
-        val alAlt: String? = if (mode == CountMode.WITH_PREFIXES && q.startsWith("ال")) {
-            // استبدال "ال..." بـ "لل..." (مثال: الله -> لله، الرحمن -> للرحمن)
-            "لل" + q.removePrefix("ال")
-        } else null
-
-        val per = ArrayList<AyahCount>()
-        var grandTotal = 0
-
-        for (a in ayat) {
-            if (a.norm.isBlank()) continue
-            var c = 0
-            val tokens = a.norm.split(' ').filter { it.isNotBlank() }
-
-            for (t in tokens) {
-                // 1) الكلمة نفسها تمامًا
-                if (t == q) { c++; continue }
-
-                if (mode == CountMode.WITH_PREFIXES) {
-                    // 2) بادئة حرف واحد من المجموعة + الكلمة (والله، بالله، …)
-                    if (t.length == q.length + 1 && PREFIXES.contains(t[0]) && t.substring(1) == q) {
-                        c++; continue
-                    }
-                    // 3) شكل "لل + بقية الكلمة" للكلمات التي تبدأ بـ"ال" (لله، للرحمن)
-                    if (alAlt != null) {
-                        if (t == alAlt) { c++; continue }
-                        // 4) بادئة + (لل + بقية) مثل: ولله، فلله، وبالرحمن-> هذا الأخير لا ينطبق (لأنها ليست للـ)
-                        if (t.length == alAlt.length + 1 && PREFIXES.contains(t[0]) && t.substring(1) == alAlt) {
-                            c++; continue
-                        }
-                    }
+        if (includeBasmala) {
+            val firstPage = HashMap<Int, Int>() // surah -> page
+            for (a in baseAyat) {
+                if (a.ayah == 1 && !firstPage.containsKey(a.surah)) {
+                    firstPage[a.surah] = a.page
                 }
             }
+            val basmalaText = "بِسْمِ اللَّهِ الرَّحْمَٰنِ الرَّحِيمِ"
+            val basmalaNorm = SearchUtils.normalizeArabic(SearchUtils.stripTashkeel(basmalaText))
+            for (s in 2..114) { // الفاتحة موجودة فعليًا، التوبة بلا بسملة
+                if (s == 9) continue
+                val p = firstPage[s] ?: continue
+                list.add(AyahItem(surah = s, ayah = 0, page = p, text = basmalaText, norm = basmalaNorm))
+            }
+        }
+        ayat = list
 
-            if (c > 0) {
-                grandTotal += c
-                per.add(AyahCount(a.surah, a.ayah, a.page, c))
+        // ===== 2) بناء الفهارس =====
+        val tokenToSet  = HashMap<String, MutableSet<Int>>()
+        val stemToSet   = HashMap<String, MutableSet<Int>>()
+        val prefixToSet = HashMap<String, MutableSet<Int>>()
+
+        ayahTokens = Array(ayat.size) { emptyList() }
+
+        for ((idx, a) in ayat.withIndex()) {
+            idToIdx[key(a.surah, a.ayah)] = idx
+
+            val tokens = tokenRe.findAll(a.norm).map { it.value }.toList()
+            ayahTokens[idx] = tokens
+
+            val unique = tokens.toHashSet()
+            for (tok in unique) {
+                tokenToSet.getOrPut(tok) { mutableSetOf() }.add(idx)
+
+                val stem = lightStem(tok)
+                stemToSet.getOrPut(stem) { mutableSetOf() }.add(idx)
+
+                val maxPref = min(MAX_PREFIX, tok.length)
+                for (len in MIN_PREFIX..maxPref) {
+                    val pref = tok.substring(0, len)
+                    prefixToSet.getOrPut(pref) { mutableSetOf() }.add(idx)
+                }
             }
         }
 
-        return CountSummary(
-            totalOccurrences = grandTotal,
-            ayahMatches = per.size,
-            perAyah = per
-        )
+        tokenToAyahs  = tokenToSet .mapValues { it.value.toIntArray().sortedArray() }
+        stemToAyahs   = stemToSet  .mapValues { it.value.toIntArray().sortedArray() }
+        prefixToAyahs = prefixToSet.mapValues { it.value.toIntArray().sortedArray() }
+    }
+
+    fun getAll(): List<AyahItem> = ayat
+
+    /** بحث جزئي سريع بدون مسح شامل */
+    fun searchPartial(qRaw: String): List<AyahItem> {
+        val q = SearchUtils.normalizeArabic(SearchUtils.stripTashkeel(qRaw))
+        if (q.length < MIN_PREFIX) return emptyList()
+
+        // نستخدم أقرب بادئة متاحة (حتى MAX_PREFIX)، وإن لم نجد نقلّص الطول تدريجيًا
+        var keyLen = min(q.length, MAX_PREFIX)
+        var ids: IntArray? = null
+        while (ids == null && keyLen >= MIN_PREFIX) {
+            ids = prefixToAyahs[q.substring(0, keyLen)]
+            keyLen--
+        }
+        val out = ArrayList<AyahItem>()
+        if (ids != null) {
+            for (i in ids) {
+                val a = ayat[i]
+                if (a.norm.contains(q)) out.add(a)
+            }
+            return out
+        }
+        // في أندر الحالات (كلمة كلها رموز…) لا نُجري مسح شامل حفاظًا على الأداء
+        return out
+    }
+
+    /** بحث كلمة كاملة سريع (مع تجذير خفيف افتراضيًا) */
+    fun searchWholeWord(qRaw: String, useStemming: Boolean = true): List<AyahItem> {
+        val q = SearchUtils.normalizeArabic(SearchUtils.stripTashkeel(qRaw))
+        if (q.isEmpty()) return emptyList()
+
+        val ids = if (useStemming) {
+            stemToAyahs[lightStem(q)]
+        } else {
+            tokenToAyahs[q]
+        } ?: IntArray(0)
+
+        val out = ArrayList<AyahItem>(ids.size)
+        for (i in ids) out.add(ayat[i])
+        return out
+    }
+
+    /** عدّ تكرارات كلمة كاملة في آية (باستخدام التوكنات المسبقة) */
+    fun countWholeOccurrences(
+        surah: Int,
+        ayah: Int,
+        wordNorm: String,
+        useStemming: Boolean = true
+    ): Int {
+        val idx = idToIdx[key(surah, ayah)] ?: return 0
+        val toks = ayahTokens[idx]
+        val stemQ = lightStem(wordNorm)
+        var c = 0
+        for (t in toks) if (t == wordNorm || (useStemming && lightStem(t) == stemQ)) c++
+        return c
+    }
+
+    private fun key(s: Int, a: Int): Int = (s shl 10) or a
+
+    /** تجذير عربي خفيف */
+    private fun lightStem(s0: String): String {
+        var s = s0
+        s = s.replace('ة','ه').replace('ى','ي')
+        if (s.startsWith("ال") && s.length > 3) s = s.substring(2)
+        if (s.length > 3 && "وفبكلس".indexOf(s[0]) >= 0) s = s.substring(1)
+        fun dropEnd(n: Int){ if (s.length > n + 1) s = s.dropLast(n) }
+        when {
+            s.endsWith("ات") -> dropEnd(2)
+            s.endsWith("ون") || s.endsWith("ين") || s.endsWith("ان") -> dropEnd(2)
+        }
+        if (s.endsWith("ه") || s.endsWith("ي") || s.endsWith("ا")) dropEnd(1)
+        return s
     }
 }
